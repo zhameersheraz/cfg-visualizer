@@ -22,7 +22,7 @@
 //
 // To deploy the backend alongside the Vercel frontend, set BACKEND_URL to
 // your Render/Fly/Railway URL, e.g. "https://cfg-visualizer-backend.onrender.com".
-const BACKEND_URL = "";  // <-- set this to your deployed backend URL
+const BACKEND_URL = "https://cfg-visualizer-backend.onrender.com";  // <-- set this to your deployed backend URL
 
 function resolveBase() {
     if (typeof window === "undefined") return "http://127.0.0.1:8000";
