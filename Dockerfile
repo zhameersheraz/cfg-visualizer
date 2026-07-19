@@ -1,20 +1,41 @@
 # CFG Visualizer backend — Dockerfile for Render / Fly / Railway / etc.
 #
-# Base: python:3.12-bookworm. We pin to Debian 12 (bookworm) because
-# radare2 is in the default `main` repo there. The current `python:3.12-slim`
-# tag is on Debian 13 (trixie) which doesn't ship radare2.
+# Strategy: build radare2 from source. radare2 is no longer in any default
+# Debian/Ubuntu repo (it was pulled when the upstream maintainer stepped
+# back). The radare.org third-party repo's signing key is also currently
+# unreachable (404). Source build is the only reliable path.
+#
+# Tradeoff: first build takes 5-10 min on Render's 0.1 vCPU. The result
+# is cached as a Docker layer, so subsequent deploys are instant.
 FROM python:3.12-bookworm
 
-# System deps: radare2 (the disassembler), curl (for Render healthcheck).
-# --no-install-recommends keeps the image small.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        radare2 \
+# Build tools + curl. r2 needs gcc, make, git, pkg-config, and a C compiler.
+# After the build we purge these to keep the final image small.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        pkg-config \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Build radare2 from source. Pinned to 5.9.4 — a stable release that's been
+# tested with our analyzer. The `sys/install.sh` script handles all the
+# configure/make/install steps and is the official r2 build path.
+ARG R2_VERSION=5.9.4
+RUN git clone --depth 1 --branch "${R2_VERSION}" https://github.com/radareorg/radare2.git /tmp/r2 \
+    && cd /tmp/r2 \
+    && ./sys/install.sh \
+    && cd / \
+    && rm -rf /tmp/r2
+
 # Sanity check — fail the build early if r2 isn't where we expect.
 RUN r2 -v | head -1
+
+# Drop the build tools now that r2 is installed. The runtime image is
+# ~300 MB smaller without gcc/git/pkg-config.
+RUN apt-get purge -y --auto-remove build-essential git pkg-config \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Set up app directory
 WORKDIR /app
