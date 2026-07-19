@@ -10,9 +10,9 @@ through. Click a node to read the disassembly, click again to dive deeper.
 Built because staring at Ghidra's flat 2D graph view during a CTF at 2am is
 the opposite of fun.
 
-**Live demo:** [cfg-visualizer.vercel.app](https://cfg-visualizer.vercel.app)
+**Live demo:** [cfg-visualizer-eight.vercel.app](https://cfg-visualizer-eight.vercel.app)
 (deployed from this repo via Vercel — frontend only, no backend, uses the
-built-in sample CFG).
+built-in sample CFG). Click **Load sample** in the top right.
 
 ![demo](docs/demo.gif)
 > Demo GIF placeholder — record a 30s capture against any picoCTF binary
