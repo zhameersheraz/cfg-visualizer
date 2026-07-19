@@ -1,60 +1,34 @@
 # CFG Visualizer backend — Dockerfile for Render / Fly / Railway / etc.
 #
-# Multi-stage build: stage 1 builds radare2 from source, stage 2 is the
-# slim runtime image with r2 binaries copied over. The radare2 build is
-# the slow part (~5 min on Render free tier) but it's cached as its own
-# layer, so future deploys skip it entirely.
+# Multi-stage: stage 1 pulls the official radare2 image (built by the
+# r2 team, so the binary is known-good), stage 2 is a slim Python image
+# with r2 artifacts copied over.
 #
-# radare2 isn't in any current default Debian repo (it was pulled when
-# the upstream maintainer stepped back), and radare.org's third-party
-# apt repo is currently 404. Source build is the only reliable path.
+# Why not build r2 from source? Two failed attempts — first because
+# ./sys/install.sh picked the wrong build path, then because the meson
+# build silently failed mid-step. The official image sidesteps both.
 
-# ----- Stage 1: build radare2 -----
-FROM python:3.12-bookworm AS r2-builder
+# ----- Stage 1: grab r2 from the official image -----
+FROM radare/radare2:5.9.4 AS r2-builder
 
-# Build tools. r2 5.9.x uses meson + ninja, not autotools — sys/install.sh
-# silently picks the wrong build path in some environments. We do the
-# meson build directly to keep the install location deterministic.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        git \
-        pkg-config \
-        meson \
-        ninja-build \
-        liblz4-dev \
-        libssl-dev \
-        libz-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Build radare2 5.9.4 from source via meson. Pinned to /usr/local so the
-# r2 binary lands at /usr/local/bin/r2, on the default PATH.
-ARG R2_VERSION=5.9.4
-RUN git clone --depth 1 --branch "${R2_VERSION}" https://github.com/radareorg/radare2.git /tmp/r2 \
-    && cd /tmp/r2 \
-    && meson setup build --prefix=/usr/local --buildtype=release \
-    && ninja -C build \
-    && ninja -C build install \
-    && ldconfig \
-    && cd / \
-    && rm -rf /tmp/r2
-
-# Verify r2 actually got installed. Fail the build here if not, so we
-# don't waste a 5-min deploy cycle on a broken image.
-RUN test -x /usr/local/bin/r2 || (echo "r2 not found at /usr/local/bin/r2" && find /usr/local -name 'r2*' -type f 2>/dev/null && exit 1) \
-    && /usr/local/bin/r2 -v | head -1
+# Diagnostic: print where r2 lives in the official image. If this changes
+# in a future r2 release we'll see it here and can adjust the COPY paths.
+RUN which r2 && r2 -v | head -1 \
+    && echo "---" \
+    && ls -la /usr/local/bin/r2* /usr/local/lib/libr_*.so* 2>/dev/null | head -20
 
 # ----- Stage 2: runtime image -----
 FROM python:3.12-bookworm
 
-# Just curl for the Render healthcheck. Nothing else from apt — we copy
-# r2 from the builder stage instead.
+# Just curl for the Render healthcheck.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
+        liblz4-1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy radare2 binaries, libraries, and data files from the builder.
-# We do this explicitly (not /usr/local/) to avoid dragging in any
-# unrelated stuff that might be in the builder's /usr/local.
+# Copy r2 binaries, libraries, and data files from the official image.
+# We copy /usr/local/bin and /usr/local/lib selectively so we don't pull
+# in any unrelated Python site-packages or other build artifacts.
 COPY --from=r2-builder /usr/local/bin/r2*            /usr/local/bin/
 COPY --from=r2-builder /usr/local/bin/radare2*       /usr/local/bin/ 2>/dev/null || true
 COPY --from=r2-builder /usr/local/lib/libr_*.so*     /usr/local/lib/
