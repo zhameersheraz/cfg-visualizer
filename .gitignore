@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / frontend tooling (if we ever add a build step)
+node_modules/
+dist/
+.cache/
+.parcel-cache/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Uploaded binaries — never commit these. They are large, possibly
+# proprietary, and the upload dir is meant to be ephemeral anyway.
+samples/*.bin
+samples/*.elf
+samples/*.exe
+samples/*.so
+samples/*.dll
+samples/*.dylib
+samples/*.macho
+!samples/README.md
+
+# Uploads directory used by the FastAPI app
+uploads/
+/tmp/cfg-visualizer-uploads/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Demo recording artifacts
+docs/demo.gif
+docs/demo.mp4
+docs/*.frames/

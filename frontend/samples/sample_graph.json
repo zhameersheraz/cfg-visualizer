@@ -1,0 +1,106 @@
+{
+  "function": "check_password",
+  "nodes": [
+    {
+      "id": "0x400526",
+      "type": "entry",
+      "disasm": [
+        "push rbp",
+        "mov rbp, rsp",
+        "sub rsp, 0x20",
+        "mov dword [rbp-0x14], edi",
+        "mov qword [rbp-0x20], rsi"
+      ]
+    },
+    {
+      "id": "0x40053a",
+      "type": "normal",
+      "disasm": [
+        "mov dword [rbp-0x4], 0x0",
+        "mov dword [rbp-0x8], 0x0",
+        "jmp 0x400590"
+      ]
+    },
+    {
+      "id": "0x400548",
+      "type": "normal",
+      "disasm": [
+        "movsxd rax, dword [rbp-0x8]",
+        "add rax, qword [rbp-0x20]",
+        "movzx eax, byte [rax]",
+        "movsx eax, al",
+        "mov edx, eax",
+        "movsxd rax, dword [rbp-0x8]",
+        "add rax, qword [rbp-0x20]",
+        "movzx eax, byte [rax]",
+        "movsx eax, al",
+        "sub edx, eax"
+      ]
+    },
+    {
+      "id": "0x400568",
+      "type": "conditional",
+      "disasm": [
+        "mov eax, dword [rbp-0x4]",
+        "cmp eax, 0x1337",
+        "jne 0x400580"
+      ]
+    },
+    {
+      "id": "0x400572",
+      "type": "normal",
+      "disasm": [
+        "add dword [rbp-0x4], 0x1",
+        "add dword [rbp-0x8], 0x1",
+        "jmp 0x400590"
+      ]
+    },
+    {
+      "id": "0x400580",
+      "type": "call",
+      "disasm": [
+        "lea rdi, [rip+0x2009a9]",
+        "call 0x4003f0  ; puts@plt",
+        "mov dword [rbp-0x4], 0x0"
+      ]
+    },
+    {
+      "id": "0x400590",
+      "type": "conditional",
+      "disasm": [
+        "movsxd rax, dword [rbp-0x8]",
+        "cmp byte [rax+0x10], 0x0",
+        "jne 0x400548"
+      ]
+    },
+    {
+      "id": "0x4005a0",
+      "type": "normal",
+      "disasm": [
+        "mov eax, dword [rbp-0x4]",
+        "cmp eax, 0x1",
+        "sete al"
+      ]
+    },
+    {
+      "id": "0x4005a8",
+      "type": "return",
+      "disasm": [
+        "leave",
+        "ret"
+      ]
+    }
+  ],
+  "edges": [
+    { "from": "0x400526", "to": "0x40053a", "type": "flow" },
+    { "from": "0x40053a", "to": "0x400590", "type": "flow" },
+    { "from": "0x400590", "to": "0x400548", "type": "jmp_true" },
+    { "from": "0x400590", "to": "0x4005a0", "type": "jmp_false" },
+    { "from": "0x400548", "to": "0x400568", "type": "flow" },
+    { "from": "0x400568", "to": "0x400572", "type": "jmp_true" },
+    { "from": "0x400568", "to": "0x400580", "type": "jmp_false" },
+    { "from": "0x400572", "to": "0x400590", "type": "flow" },
+    { "from": "0x400580", "to": "0x4005a0", "type": "flow" },
+    { "from": "0x4005a0", "to": "0x4005a8", "type": "flow" }
+  ]
+}
