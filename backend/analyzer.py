@@ -193,12 +193,14 @@ class R2Analyzer:
 
         token = target.strip()
         addr = None
+        func_name = ""
 
         # First, try the cached function list to resolve names to addresses.
         # r2's `agj @ <name>` is unreliable across r2 versions; resolving
         # via the cached list and passing a real address always works.
         for f in self._functions or []:
             if str(f.get("name") or "") == token:
+                func_name = str(f.get("name") or "")
                 addr_raw = f.get("addr")
                 if addr_raw is None:
                     addr_raw = f.get("offset") or 0
@@ -219,7 +221,7 @@ class R2Analyzer:
         agj = self._cmdj(f"agj @ {addr}")
         if not agj:
             raise LookupError(f"No graph returned for function {target!r}")
-        return transform_agj(agj)
+        return transform_agj(agj, func_name or token)
 
 
 # --- Schema transform -------------------------------------------------------
@@ -253,24 +255,37 @@ def _disasm_lines(ops: List[Dict]) -> List[str]:
     return lines
 
 
-def transform_agj(agj: Dict) -> Dict:
+def transform_agj(agj, func_name: str = "") -> Dict:
     """
     Convert radare2's `agj` output into the CFG schema used by the frontend.
 
-    The radare2 format is roughly:
-        { "name": "main", "offset": 0x..., "blocks": [
-            { "offset": 0x..., "jump": 0x..., "fail": 0x..., "ops": [ ... ] },
-            ...
-        ]}
+    r2 6.x changed the output format: `agj @ <addr>` now returns a JSON
+    *array* of blocks directly, with no wrapper object. Older r2 versions
+    wrapped the blocks in a dict with `name`/`blocks` fields. We accept
+    both.
+
+    r2 6.x output:
+        [
+          { "addr": 0x..., "jump": 0x..., "fail": 0x..., "ops": [ ... ] },
+          ...
+        ]
+
+    Older r2 output:
+        { "name": "main", "blocks": [ ... ] }
 
     We produce:
         { "function": "...", "nodes": [...], "edges": [...] }
     """
     if not agj:
-        return {"function": "", "nodes": [], "edges": []}
+        return {"function": func_name, "nodes": [], "edges": []}
 
-    blocks = agj.get("blocks") or []
-    func_name = str(agj.get("name") or "")
+    # r2 6.x: list directly. Older: dict wrapper.
+    if isinstance(agj, list):
+        blocks = agj
+    else:
+        blocks = agj.get("blocks") or []
+        if not func_name:
+            func_name = str(agj.get("name") or "")
 
     nodes: List[Dict] = []
     edges: List[Dict] = []
