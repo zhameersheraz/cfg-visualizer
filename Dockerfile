@@ -1,28 +1,16 @@
 # CFG Visualizer backend — Dockerfile for Render / Fly / Railway / etc.
 #
-# Base: python:3.12-slim. We use 3.12 instead of 3.13 because all our deps
-# have stable cp312 wheels (cp313 is fine too, but 3.12 is more battle-tested
-# for server deploys). radare2 is NOT in the default Debian repos, so we
-# add the official radare.org apt repo before installing.
-FROM python:3.12-slim
+# Base: python:3.12-bookworm. We pin to Debian 12 (bookworm) because
+# radare2 is in the default `main` repo there. The current `python:3.12-slim`
+# tag is on Debian 13 (trixie) which doesn't ship radare2.
+FROM python:3.12-bookworm
 
-# Install prerequisites: curl to fetch the r2 repo key, gnupg2 for the
-# keyring, ca-certificates for HTTPS.
+# System deps: radare2 (the disassembler), curl (for Render healthcheck).
+# --no-install-recommends keeps the image small.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl \
-        ca-certificates \
-        gnupg2 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Add radare.org's official Debian repo. They sign their repo with a
-# GPG key we add to the trusted keyrings. The signed-by= option in the
-# sources file ensures apt only trusts the key we just added.
-RUN curl -fsSL https://radare.org/repo.gpg | gpg --dearmor -o /usr/share/keyrings/radare-archive-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/radare-archive-keyring.gpg] https://radare.org/repo/ stable main" > /etc/apt/sources.list.d/radare.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
         radare2 \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Sanity check — fail the build early if r2 isn't where we expect.
