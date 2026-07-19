@@ -2,16 +2,31 @@
 #
 # Base: python:3.12-slim. We use 3.12 instead of 3.13 because all our deps
 # have stable cp312 wheels (cp313 is fine too, but 3.12 is more battle-tested
-# for server deploys). radare2 is installed via apt.
+# for server deploys). radare2 is NOT in the default Debian repos, so we
+# add the official radare.org apt repo before installing.
 FROM python:3.12-slim
 
-# System deps: radare2 (the disassembler), curl (for Render healthcheck).
-# We use --no-install-recommends to keep the image small.
+# Install prerequisites: curl to fetch the r2 repo key, gnupg2 for the
+# keyring, ca-certificates for HTTPS.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        radare2 \
         curl \
+        ca-certificates \
+        gnupg2 \
     && rm -rf /var/lib/apt/lists/*
+
+# Add radare.org's official Debian repo. They sign their repo with a
+# GPG key we add to the trusted keyrings. The signed-by= option in the
+# sources file ensures apt only trusts the key we just added.
+RUN curl -fsSL https://radare.org/repo.gpg | gpg --dearmor -o /usr/share/keyrings/radare-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/radare-archive-keyring.gpg] https://radare.org/repo/ stable main" > /etc/apt/sources.list.d/radare.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        radare2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Sanity check — fail the build early if r2 isn't where we expect.
+RUN r2 -v | head -1
 
 # Set up app directory
 WORKDIR /app
