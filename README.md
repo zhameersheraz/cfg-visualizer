@@ -10,6 +10,10 @@ through. Click a node to read the disassembly, click again to dive deeper.
 Built because staring at Ghidra's flat 2D graph view during a CTF at 2am is
 the opposite of fun.
 
+**Live demo:** [cfg-visualizer.vercel.app](https://cfg-visualizer.vercel.app)
+(deployed from this repo via Vercel — frontend only, no backend, uses the
+built-in sample CFG).
+
 ![demo](docs/demo.gif)
 > Demo GIF placeholder — record a 30s capture against any picoCTF binary
 > using the [Peek](https://github.com/phw/peek) or `ffmpeg` from the
@@ -92,7 +96,22 @@ Edge `type`: `flow | jmp_true | jmp_false | call`.
 
 ## Quick start
 
-### 1. Prerequisites
+### 0. Just see the 3D graph (no install, no backend)
+
+Open the [live demo on Vercel](https://cfg-visualizer.vercel.app) and click
+**Load sample** in the top right. That uses the built-in `sample_graph.json`
+so the 3D view works without running anything on your machine.
+
+To deploy your own copy (one CLI command, no local server):
+
+```bash
+cd ~/cfg-visualizer
+npx vercel@latest --prod
+```
+
+That's it. Vercel will print a URL like `https://cfg-visualizer-<hash>.vercel.app`.
+
+### 1. Local development (full upload flow)
 
 - Python 3.10+
 - `radare2` on your `PATH` (this project shells out to it via `r2pipe`)
