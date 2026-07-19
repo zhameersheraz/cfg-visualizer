@@ -159,37 +159,59 @@ class R2Analyzer:
             self.analyze()
         out: List[FunctionSummary] = []
         for f in self._functions or []:
+            name = str(f.get("name") or "")
+            # r2 6.x uses "addr"; older versions used "offset". Accept both
+            # for forward-compat.
+            addr_raw = f.get("addr")
+            if addr_raw is None:
+                addr_raw = f.get("offset") or 0
+            # Drop PLT imports and other zero-CFG entries so the sidebar
+            # isn't dominated by sym.imp.* stubs that can't be graphed.
+            if name.startswith("sym.imp."):
+                continue
+            if f.get("is-pure") in (True, "true") and int(f.get("outdegree") or 0) == 0:
+                continue
             out.append(
                 FunctionSummary(
-                    name=str(f.get("name") or ""),
-                    address=hex(int(f.get("offset") or 0)),
+                    name=name,
+                    address=hex(int(addr_raw)),
                     size=int(f.get("size") or 0),
                 )
             )
         return out
 
-    def get_function_cfg(self, address: str) -> Dict:
-        """Get CFG JSON for `address` (e.g. "0x400526" or "400526")."""
-        # Normalize the address so users can paste either form.
-        addr = address.strip().lower()
-        if not addr.startswith("0x"):
-            addr = "0x" + addr
+    def get_function_cfg(self, target: str) -> Dict:
+        """
+        Get CFG JSON for a function.
 
-        agj = self._cmdj(f"agj @ {addr}")
+        `target` may be either:
+          - an address: "0x400526", "400526", "0X400526"
+          - a function name: "main", "sym.error", "fcn.00006790"
+        """
+        if not target:
+            raise LookupError("Empty function target")
+
+        token = target.strip()
+
+        # Try as an address first if it looks like one.
+        if token.lower().startswith("0x") or all(c in "0123456789abcdefABCDEF" for c in token):
+            addr = token.lower()
+            if not addr.startswith("0x"):
+                addr = "0x" + addr
+            agj = self._cmdj(f"agj @ {addr}")
+        else:
+            # Treat as a function name. r2 resolves names inside @ expressions.
+            agj = self._cmdj(f"agj @ {token}")
+
+        if not agj and self._functions:
+            # Last-ditch: scan the cached list for a name match.
+            for f in self._functions:
+                if str(f.get("name") or "") == token:
+                    addr_raw = f.get("addr") or f.get("offset") or 0
+                    agj = self._cmdj(f"agj @ {hex(int(addr_raw))}")
+                    break
         if not agj:
-            # Try a tolerant match against the cached function list.
-            target = int(addr, 16)
-            match = next(
-                (
-                    f for f in (self._functions or [])
-                    if int(f.get("offset") or 0) == target
-                ),
-                None,
-            )
-            if match is not None:
-                agj = self._cmdj(f"agj @ {hex(int(match['offset']))}")
-        if not agj:
-            raise LookupError(f"No graph returned for function at {addr}")
+            raise LookupError(f"No graph returned for function {token!r}")
         return transform_agj(agj)
 
 
@@ -248,7 +270,11 @@ def transform_agj(agj: Dict) -> Dict:
     seen: set[str] = set()
 
     for i, block in enumerate(blocks):
-        offset = int(block.get("offset") or 0)
+        # r2 6.x uses "addr" for block addresses; older versions used "offset".
+        addr_raw = block.get("addr")
+        if addr_raw is None:
+            addr_raw = block.get("offset") or 0
+        offset = int(addr_raw)
         node_id = hex(offset)
         ops = block.get("ops") or []
         disasm = _disasm_lines(ops)
