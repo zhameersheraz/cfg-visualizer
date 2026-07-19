@@ -318,8 +318,9 @@ async function loadSample() {
         state.currentView = "sample";
         showToast("Loaded built-in sample CFG (no backend needed).", "info", 4000);
     } catch (err) {
-        console.error(err);
-        showToast("Could not load sample CFG.", "error", 5000);
+        console.error("loadSample failed:", err);
+        const msg = err && err.message ? `Sample load failed: ${err.message}` : "Could not load sample CFG.";
+        showToast(msg, "error", 6000);
     } finally {
         hideLoading();
     }

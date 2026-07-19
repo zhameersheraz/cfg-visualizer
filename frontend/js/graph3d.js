@@ -279,7 +279,17 @@ export class Graph3D {
             // Fallback: place nodes on a circle. Layout still readable.
             this._layoutCircle(nodes);
         } else {
-            this._layoutForce(nodes, edges, d3f);
+            try {
+                this._layoutForce(nodes, edges, d3f);
+            } catch (err) {
+                // If d3-force-3d throws (older bundle, different shape, NaN
+                // coords from a degenerate graph), fall back to a circle layout
+                // so the user still sees *something* rather than an empty canvas.
+                console.warn("d3-force-3d layout failed, using circle fallback:", err);
+                // Strip any partial __pos that may have been written.
+                nodes.forEach((n) => { delete n.__pos; });
+                this._layoutCircle(nodes);
+            }
         }
 
         // Edges first so nodes draw over them.
