@@ -192,26 +192,33 @@ class R2Analyzer:
             raise LookupError("Empty function target")
 
         token = target.strip()
+        addr = None
 
-        # Try as an address first if it looks like one.
-        if token.lower().startswith("0x") or all(c in "0123456789abcdefABCDEF" for c in token):
-            addr = token.lower()
-            if not addr.startswith("0x"):
-                addr = "0x" + addr
-            agj = self._cmdj(f"agj @ {addr}")
-        else:
-            # Treat as a function name. r2 resolves names inside @ expressions.
-            agj = self._cmdj(f"agj @ {token}")
+        # First, try the cached function list to resolve names to addresses.
+        # r2's `agj @ <name>` is unreliable across r2 versions; resolving
+        # via the cached list and passing a real address always works.
+        for f in self._functions or []:
+            if str(f.get("name") or "") == token:
+                addr_raw = f.get("addr")
+                if addr_raw is None:
+                    addr_raw = f.get("offset") or 0
+                addr = hex(int(addr_raw))
+                break
 
-        if not agj and self._functions:
-            # Last-ditch: scan the cached list for a name match.
-            for f in self._functions:
-                if str(f.get("name") or "") == token:
-                    addr_raw = f.get("addr") or f.get("offset") or 0
-                    agj = self._cmdj(f"agj @ {hex(int(addr_raw))}")
-                    break
+        # If not in the list, try as an address.
+        if addr is None:
+            if token.lower().startswith("0x") or all(c in "0123456789abcdefABCDEF" for c in token):
+                addr = token.lower()
+                if not addr.startswith("0x"):
+                    addr = "0x" + addr
+            else:
+                # Last-ditch: r2's name resolution. May or may not work
+                # depending on r2 version.
+                addr = token
+
+        agj = self._cmdj(f"agj @ {addr}")
         if not agj:
-            raise LookupError(f"No graph returned for function {token!r}")
+            raise LookupError(f"No graph returned for function {target!r}")
         return transform_agj(agj)
 
 
