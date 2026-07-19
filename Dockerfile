@@ -29,11 +29,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy r2 binaries, libraries, and data files from the official image.
 # We copy /usr/local/bin and /usr/local/lib selectively so we don't pull
 # in any unrelated Python site-packages or other build artifacts.
-COPY --from=r2-builder /usr/local/bin/r2*            /usr/local/bin/
-COPY --from=r2-builder /usr/local/bin/radare2*       /usr/local/bin/ 2>/dev/null || true
+# Note: COPY is a native Docker instruction — no shell redirects like
+# `2>/dev/null || true` are allowed inside it. Each COPY is one source path.
+COPY --from=r2-builder /usr/local/bin/r2            /usr/local/bin/r2
 COPY --from=r2-builder /usr/local/lib/libr_*.so*     /usr/local/lib/
-COPY --from=r2-builder /usr/local/lib/radare2/       /usr/local/lib/radare2/
-COPY --from=r2-builder /usr/local/share/radare2/     /usr/local/share/radare2/
+COPY --from=r2-builder /usr/local/lib/radare2       /usr/local/lib/radare2
+COPY --from=r2-builder /usr/local/share/radare2      /usr/local/share/radare2
 
 # Final verification — both at the binary level and via PATH resolution.
 RUN test -x /usr/local/bin/r2 && r2 -v | head -1
