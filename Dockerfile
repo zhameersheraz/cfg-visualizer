@@ -1,26 +1,28 @@
 # CFG Visualizer backend — Dockerfile for Render / Fly / Railway / etc.
 #
-# Strategy: build radare2 from source. radare2 is no longer in any default
-# Debian/Ubuntu repo (it was pulled when the upstream maintainer stepped
-# back). The radare.org third-party repo's signing key is also currently
-# unreachable (404). Source build is the only reliable path.
+# Multi-stage build: stage 1 builds radare2 from source, stage 2 is the
+# slim runtime image with r2 binaries copied over. The radare2 build is
+# the slow part (~5 min on Render free tier) but it's cached as its own
+# layer, so future deploys skip it entirely.
 #
-# Tradeoff: first build takes 5-10 min on Render's 0.1 vCPU. The result
-# is cached as a Docker layer, so subsequent deploys are instant.
-FROM python:3.12-bookworm
+# radare2 isn't in any current default Debian repo (it was pulled when
+# the upstream maintainer stepped back), and radare.org's third-party
+# apt repo is currently 404. Source build is the only reliable path.
 
-# Build tools + curl. r2 needs gcc, make, git, pkg-config, and a C compiler.
-# After the build we purge these to keep the final image small.
+# ----- Stage 1: build radare2 -----
+FROM python:3.12-bookworm AS r2-builder
+
+# Build tools. We keep them in the builder stage and discard the whole
+# stage at the end (multi-stage = smaller final image, no autoremove
+# risk of removing r2's runtime deps).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         git \
         pkg-config \
-        curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Build radare2 from source. Pinned to 5.9.4 — a stable release that's been
-# tested with our analyzer. The `sys/install.sh` script handles all the
-# configure/make/install steps and is the official r2 build path.
+# Build radare2 5.9.4 from source. The official sys/install.sh handles
+# configure/make/install with /usr/local as the prefix.
 ARG R2_VERSION=5.9.4
 RUN git clone --depth 1 --branch "${R2_VERSION}" https://github.com/radareorg/radare2.git /tmp/r2 \
     && cd /tmp/r2 \
@@ -28,14 +30,31 @@ RUN git clone --depth 1 --branch "${R2_VERSION}" https://github.com/radareorg/ra
     && cd / \
     && rm -rf /tmp/r2
 
-# Sanity check — fail the build early if r2 isn't where we expect.
-RUN r2 -v | head -1
+# Verify r2 actually got installed. Fail the build here if not, so we
+# don't waste a 5-min deploy cycle on a broken image.
+RUN test -x /usr/local/bin/r2 || (echo "r2 not found at /usr/local/bin/r2" && exit 1) \
+    && /usr/local/bin/r2 -v | head -1
 
-# Drop the build tools now that r2 is installed. The runtime image is
-# ~300 MB smaller without gcc/git/pkg-config.
-RUN apt-get purge -y --auto-remove build-essential git pkg-config \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+# ----- Stage 2: runtime image -----
+FROM python:3.12-bookworm
+
+# Just curl for the Render healthcheck. Nothing else from apt — we copy
+# r2 from the builder stage instead.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy radare2 binaries, libraries, and data files from the builder.
+# We do this explicitly (not /usr/local/) to avoid dragging in any
+# unrelated stuff that might be in the builder's /usr/local.
+COPY --from=r2-builder /usr/local/bin/r2*            /usr/local/bin/
+COPY --from=r2-builder /usr/local/bin/radare2*       /usr/local/bin/ 2>/dev/null || true
+COPY --from=r2-builder /usr/local/lib/libr_*.so*     /usr/local/lib/
+COPY --from=r2-builder /usr/local/lib/radare2/       /usr/local/lib/radare2/
+COPY --from=r2-builder /usr/local/share/radare2/     /usr/local/share/radare2/
+
+# Final verification — both at the binary level and via PATH resolution.
+RUN test -x /usr/local/bin/r2 && r2 -v | head -1
 
 # Set up app directory
 WORKDIR /app
