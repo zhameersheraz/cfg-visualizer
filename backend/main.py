@@ -342,7 +342,7 @@ if __name__ == "__main__":  # pragma: no cover
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
     uvicorn.run(
         "main:app",
-        host=os.environ.get("HOST", "127.0.0.1"),
+        host=os.environ.get("HOST", "0.0.0.0"),
         port=int(os.environ.get("PORT", "8000")),
         reload=bool(int(os.environ.get("RELOAD", "0"))),
     )

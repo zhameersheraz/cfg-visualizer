@@ -13,13 +13,30 @@
  *     module is imported
  */
 
-const explicitBase = (typeof window !== "undefined" && window.CFG_API_BASE) || null;
-const defaultBase =
-    typeof window !== "undefined" && window.location
-        ? `${window.location.protocol}//${window.location.hostname}:8000`
-        : "http://127.0.0.1:8000";
+// API base resolution order:
+//   1. window.CFG_API_BASE (set in index.html or via a runtime config)
+//   2. <meta name="cfg-api-base" content="..."> in index.html
+//   3. Hard-coded BACKEND_URL below (set this when deploying)
+//   4. Auto-detect: same hostname as the frontend, port 8000
+//   5. Fallback: http://127.0.0.1:8000
+//
+// To deploy the backend alongside the Vercel frontend, set BACKEND_URL to
+// your Render/Fly/Railway URL, e.g. "https://cfg-visualizer-backend.onrender.com".
+const BACKEND_URL = "";  // <-- set this to your deployed backend URL
 
-const BASE = (explicitBase || defaultBase).replace(/\/+$/, "");
+function resolveBase() {
+    if (typeof window === "undefined") return "http://127.0.0.1:8000";
+    if (window.CFG_API_BASE) return window.CFG_API_BASE;
+    const meta = document.querySelector('meta[name="cfg-api-base"]');
+    if (meta && meta.content) return meta.content;
+    if (BACKEND_URL) return BACKEND_URL;
+    const proto = window.location.protocol;
+    const host = window.location.hostname;
+    if (!host) return "http://127.0.0.1:8000";
+    return `${proto}//${host}:8000`;
+}
+
+const BASE = resolveBase().replace(/\/+$/, "");
 
 class ApiError extends Error {
     constructor(message, status) {

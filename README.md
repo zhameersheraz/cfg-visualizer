@@ -111,6 +111,49 @@ npx vercel@latest --prod
 
 That's it. Vercel will print a URL like `https://cfg-visualizer-<hash>.vercel.app`.
 
+### 0b. Deploy the backend (optional, for full upload flow)
+
+The Vercel frontend alone runs in sample-only mode. To enable real binary
+uploads from the public site, deploy the FastAPI backend somewhere that
+supports Python + radare2 + long-running processes.
+
+**Recommended: [Render.com](https://render.com) free tier** (web dashboard,
+no CLI needed):
+
+1. Sign up at [render.com](https://render.com) using **Continue with GitHub**
+2. Click **New +** → **Web Service**
+3. Select the **`zhameersheraz/cfg-visualizer`** repo (you may need to grant
+   Render access to it under **Account Settings → GitHub**)
+4. Render auto-detects the `Dockerfile` at the repo root. Confirm:
+   - **Runtime**: Docker
+   - **Region**: any near you
+   - **Instance Type**: Free
+5. Click **Advanced** and add these environment variables:
+   - `CFG_CORS_ORIGINS` = `https://cfg-visualizer-eight.vercel.app`
+     (your Vercel URL — must include the origin that's allowed to call the API)
+   - Leave `PORT` blank — Render injects `10000` automatically
+6. Click **Create Web Service**. First build takes 3-5 minutes (apt install
+   of radare2 is the slow part).
+7. When the deploy shows "Live", copy the URL — it looks like
+   `https://cfg-visualizer-backend-xyz.onrender.com`
+8. Open `frontend/js/api.js` in your repo, change the `BASE` constant to
+   that URL:
+   ```js
+   const BASE = "https://cfg-visualizer-backend-xyz.onrender.com";
+   ```
+9. Commit and push. Vercel auto-redeploys the frontend with the new backend
+   URL baked in.
+
+**Free-tier tradeoffs**: Render sleeps the service after 15 min of no
+traffic, so the first request after a long pause takes 30-50s (cold start).
+Subsequent requests are fast. For an always-on service, upgrade to the $7/mo
+plan or use Fly.io / Railway.
+
+**Security note**: the README's earlier warning still stands. You're now
+running `radare2` on a public server processing arbitrary uploads from the
+internet. For a portfolio piece this is fine; for a real product, add
+authentication, rate limiting, and a sandboxed subprocess runner.
+
 ### 1. Local development (full upload flow)
 
 - Python 3.10+
