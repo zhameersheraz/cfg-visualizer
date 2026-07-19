@@ -12,27 +12,35 @@
 # ----- Stage 1: build radare2 -----
 FROM python:3.12-bookworm AS r2-builder
 
-# Build tools. We keep them in the builder stage and discard the whole
-# stage at the end (multi-stage = smaller final image, no autoremove
-# risk of removing r2's runtime deps).
+# Build tools. r2 5.9.x uses meson + ninja, not autotools — sys/install.sh
+# silently picks the wrong build path in some environments. We do the
+# meson build directly to keep the install location deterministic.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         git \
         pkg-config \
+        meson \
+        ninja-build \
+        liblz4-dev \
+        libssl-dev \
+        libz-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Build radare2 5.9.4 from source. The official sys/install.sh handles
-# configure/make/install with /usr/local as the prefix.
+# Build radare2 5.9.4 from source via meson. Pinned to /usr/local so the
+# r2 binary lands at /usr/local/bin/r2, on the default PATH.
 ARG R2_VERSION=5.9.4
 RUN git clone --depth 1 --branch "${R2_VERSION}" https://github.com/radareorg/radare2.git /tmp/r2 \
     && cd /tmp/r2 \
-    && ./sys/install.sh \
+    && meson setup build --prefix=/usr/local --buildtype=release \
+    && ninja -C build \
+    && ninja -C build install \
+    && ldconfig \
     && cd / \
     && rm -rf /tmp/r2
 
 # Verify r2 actually got installed. Fail the build here if not, so we
 # don't waste a 5-min deploy cycle on a broken image.
-RUN test -x /usr/local/bin/r2 || (echo "r2 not found at /usr/local/bin/r2" && exit 1) \
+RUN test -x /usr/local/bin/r2 || (echo "r2 not found at /usr/local/bin/r2" && find /usr/local -name 'r2*' -type f 2>/dev/null && exit 1) \
     && /usr/local/bin/r2 -v | head -1
 
 # ----- Stage 2: runtime image -----
