@@ -255,23 +255,59 @@ def _disasm_lines(ops: List[Dict]) -> List[str]:
     return lines
 
 
+def _looks_like_block(obj) -> bool:
+    """A radare2 basic block carries an address plus ops and/or control flow."""
+    if not isinstance(obj, dict):
+        return False
+    if "blocks" in obj and "ops" not in obj:
+        return False          # this is a function wrapper, not a block
+    return ("addr" in obj) or ("offset" in obj)
+
+
+def unwrap_agj(agj):
+    """
+    Return (blocks, function_name) from whatever shape `agj` produced.
+
+    Measured, not assumed. On radare2 5.9.4, `agj @ addr` returns a JSON
+    *array of one function wrapper*, and the blocks live one level deeper:
+
+        [ { "name": "fcn.x", "offset": 4196976, "blocks": [ ... ] } ]
+
+    This function used to assume a list meant "the blocks themselves", which
+    is what makes every upload come back as one entry node with no disassembly
+    and no edges: the loop iterated the wrapper, read its `offset` as the node
+    address, and then found no `ops`, no `jump` and no `fail` because those all
+    live inside the wrapper's `blocks`.
+
+    Rather than encode one version's shape, probe the structure.
+    """
+    name = ""
+
+    # List containing a single function wrapper.
+    if isinstance(agj, list) and len(agj) == 1 and isinstance(agj[0], dict) \
+            and isinstance(agj[0].get("blocks"), list):
+        wrapper = agj[0]
+        name = str(wrapper.get("name") or "")
+        return wrapper["blocks"], name
+
+    # Dict wrapper.
+    if isinstance(agj, dict) and isinstance(agj.get("blocks"), list):
+        return agj["blocks"], str(agj.get("name") or "")
+
+    # A list of blocks.
+    if isinstance(agj, list) and agj and all(_looks_like_block(b) for b in agj):
+        return agj, name
+
+    # A single block.
+    if _looks_like_block(agj):
+        return [agj], name
+
+    return [], name
+
+
 def transform_agj(agj, func_name: str = "") -> Dict:
     """
     Convert radare2's `agj` output into the CFG schema used by the frontend.
-
-    r2 6.x changed the output format: `agj @ <addr>` now returns a JSON
-    *array* of blocks directly, with no wrapper object. Older r2 versions
-    wrapped the blocks in a dict with `name`/`blocks` fields. We accept
-    both.
-
-    r2 6.x output:
-        [
-          { "addr": 0x..., "jump": 0x..., "fail": 0x..., "ops": [ ... ] },
-          ...
-        ]
-
-    Older r2 output:
-        { "name": "main", "blocks": [ ... ] }
 
     We produce:
         { "function": "...", "nodes": [...], "edges": [...] }
@@ -279,23 +315,21 @@ def transform_agj(agj, func_name: str = "") -> Dict:
     if not agj:
         return {"function": func_name, "nodes": [], "edges": []}
 
-    # r2 6.x: list directly. Older: dict wrapper.
-    if isinstance(agj, list):
-        blocks = agj
-    else:
-        blocks = agj.get("blocks") or []
-        if not func_name:
-            func_name = str(agj.get("name") or "")
+    blocks, discovered_name = unwrap_agj(agj)
+    if discovered_name and not func_name:
+        func_name = discovered_name
 
     nodes: List[Dict] = []
     edges: List[Dict] = []
     seen: set[str] = set()
 
     for i, block in enumerate(blocks):
-        # r2 6.x uses "addr" for block addresses; older versions used "offset".
+        # 5.x calls it "offset", 6.x calls it "addr". Accept either.
         addr_raw = block.get("addr")
         if addr_raw is None:
-            addr_raw = block.get("offset") or 0
+            addr_raw = block.get("offset")
+        if addr_raw is None:
+            continue
         offset = int(addr_raw)
         node_id = hex(offset)
         ops = block.get("ops") or []
