@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -192,7 +194,36 @@ class OverviewResponse(BaseModel):
 
 @app.get("/healthz")
 def healthz() -> Dict:
-    return {"ok": True, "sessions": len(manager._sessions)}
+    """Liveness probe that also reports the one dependency that actually matters.
+
+    This used to return ok:true unconditionally, which is how a container with
+    no radare2 installed passed its healthcheck while every upload came back
+    422. Render only restarts what it believes is unhealthy, so "is the process
+    up" was never the question worth asking.
+    """
+    r2_path = shutil.which("r2")
+    r2_version = None
+    if r2_path:
+        try:
+            proc = subprocess.run(
+                [r2_path, "-v"],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            first = (proc.stdout or proc.stderr or "").strip().splitlines()
+            r2_version = first[0] if first else None
+        except (subprocess.SubprocessError, OSError):
+            r2_version = "present but could not be queried"
+
+    healthy = r2_path is not None
+    return {
+        "ok": healthy,
+        "sessions": len(manager._sessions),
+        "radare2": {
+            "present": healthy,
+            "path": r2_path,
+            "version": r2_version,
+        },
+    }
 
 
 @app.post("/upload", response_model=UploadResponse)
