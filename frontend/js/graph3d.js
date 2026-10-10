@@ -11,9 +11,10 @@
  *   g.resetView();
  *   g.dispose();
  *
- * Layout: d3-force-3d settles node positions in 3D, then we hand the
- * positions to Three.js meshes. We never re-run the simulation after the
- * first settle — interactions are pure camera + highlight.
+ * Layout: a seeded Fruchterman-Reingold force simulation in 3D settles node
+ * positions, then we hand the positions to Three.js meshes. We never re-run
+ * the simulation after the first settle — interactions are pure camera +
+ * highlight.
  *
  * Visual style: dark, NOCTURNE. Nodes are spheres with a subtle inner glow
  * sprite. Edges are thin lines color-coded by edge type. A faint starfield
@@ -273,64 +274,136 @@ export class Graph3D {
     }
 
     _buildGraph(nodes, edges, isOverview) {
-        // d3-force-3d runs in window scope (UMD bundle).
-        const d3f = window.d3 || window.d3Force3d;
-        if (!d3f || !d3f.forceSimulation) {
-            // Fallback: place nodes on a circle. Layout still readable.
-            this._layoutCircle(nodes);
-        } else {
-            try {
-                this._layoutForce(nodes, edges, d3f);
-            } catch (err) {
-                // If d3-force-3d throws (older bundle, different shape, NaN
-                // coords from a degenerate graph), fall back to a circle layout
-                // so the user still sees *something* rather than an empty canvas.
-                console.warn("d3-force-3d layout failed, using circle fallback:", err);
-                // Strip any partial __pos that may have been written.
-                nodes.forEach((n) => { delete n.__pos; });
-                this._layoutCircle(nodes);
-            }
+        // Self-contained 3D force layout. d3-force-3d@3.0.5 is broken from its
+        // own CDN bundle: forceSimulation throws "u.timer is not a function"
+        // on a bare page, before any of this project's code runs. The old
+        // try/catch around it turned that into a flat circle fallback, which
+        // put every node in one clump and made the tool look dead. Fifty lines
+        // of Fruchterman-Reingold is cheaper than debugging someone else's
+        // bundle, has no CDN to break, and is seeded so the same graph always
+        // lays out the same way.
+        this._layoutForce(nodes, edges);
+
+        // Nodes must be built before edges. _buildEdges looks up endpoints in
+        // _nodeById, and this used to run first while that map was still empty,
+        // so every edge hit its `continue` and no edge was ever drawn. The
+        // "edges first so nodes draw over them" comment was describing draw
+        // order, which depthWrite:false on the edge material already handles.
+        this._buildNodes(nodes, isOverview);
+        this._buildEdges(edges || [], isOverview);
+    }
+
+    _layoutForce(nodes, edges) {
+        const N = nodes.length;
+        if (N === 0) return;
+        if (N === 1) {
+            nodes[0].__pos = [0, 0, 0];
+            return;
         }
 
-        // Edges first so nodes draw over them.
-        this._buildEdges(edges || [], isOverview);
-        this._buildNodes(nodes, isOverview);
-    }
+        // xorshift32. Seeded rather than Math.random so the same graph always
+        // produces the same picture, which matters when you are comparing two
+        // disassemblies of the same function.
+        let seed = (0x2f6e2b1 ^ (N * 2654435761)) >>> 0;
+        const rand = () => {
+            seed ^= seed << 13; seed >>>= 0;
+            seed ^= seed >>> 17;
+            seed ^= seed << 5; seed >>>= 0;
+            return seed / 4294967296;
+        };
 
-    _layoutCircle(nodes) {
-        const r = Math.max(8, nodes.length * 0.8);
-        nodes.forEach((n, i) => {
-            const a = (i / nodes.length) * Math.PI * 2;
-            n.__pos = [Math.cos(a) * r, 0, Math.sin(a) * r];
-        });
-    }
+        // Seed on a sphere, not a circle. Starting coplanar lets the whole
+        // graph settle into a flat disc and the "3D" is wasted.
+        const R0 = 20;
+        const P = new Float64Array(N * 3);
+        for (let i = 0; i < N; i++) {
+            const theta = (i / N) * Math.PI * 2;
+            const u = rand() * 2 - 1;
+            const s = Math.sqrt(Math.max(0, 1 - u * u));
+            P[i * 3] = Math.cos(theta) * s * R0;
+            P[i * 3 + 1] = u * R0;
+            P[i * 3 + 2] = Math.sin(theta) * s * R0;
+        }
 
-    _layoutForce(nodes, edges, d3f) {
-        // d3-force-3d works on plain objects with x/y/z; we attach __pos
-        // (a Float64Array-friendly tuple) at the end.
-        const simNodes = nodes.map((n) => ({ id: n.id, ref: n }));
-        const simLinks = (edges || [])
-            .filter((e) => nodes.find((n) => n.id === e.from) && nodes.find((n) => n.id === e.to))
-            .map((e) => ({ source: e.from, target: e.to }));
+        const index = new Map(nodes.map((n, i) => [n.id, i]));
+        const pairs = [];
+        for (const e of edges || []) {
+            const a = index.get(e.from);
+            const b = index.get(e.to);
+            if (a === undefined || b === undefined || a === b) continue;
+            pairs.push(a, b);
+        }
 
-        const sim = d3f.forceSimulation(simNodes)
-            .force(
-                "link",
-                d3f.forceLink(simLinks)
-                    .id((d) => d.id)
-                    .distance(8)
-                    .strength(0.5)
-            )
-            .force("charge", d3f.forceManyBody().strength(-60))
-            .force("center", d3f.forceCenter(0, 0, 0));
+        const k = Math.cbrt(N) * 6;      // ideal edge length
+        const ITER = 320;
+        let temp = k * 0.5;              // cooling temperature
+        const cool = (temp * 2) / (ITER + 1);
+        const F = new Float64Array(N * 3);
 
-        // Run the simulation synchronously to a steady state. d3's "tick" is
-        // async-friendly, but for static embedding we can step it ourselves.
-        for (let i = 0; i < 200; i++) sim.tick();
-        sim.stop();
+        for (let iter = 0; iter < ITER; iter++) {
+            F.fill(0);
 
-        for (const n of simNodes) {
-            n.ref.__pos = [n.x || 0, n.y || 0, n.z || 0];
+            // Repulsion between every pair. O(n^2), which is fine: a function
+            // CFG is tens of nodes, and this runs once per graph, not per frame.
+            for (let i = 0; i < N; i++) {
+                for (let j = i + 1; j < N; j++) {
+                    let dx = P[i * 3] - P[j * 3];
+                    let dy = P[i * 3 + 1] - P[j * 3 + 1];
+                    let dz = P[i * 3 + 2] - P[j * 3 + 2];
+                    let d2 = dx * dx + dy * dy + dz * dz;
+                    if (d2 < 1e-4) {
+                        // Coincident nodes would produce a divide by zero and
+                        // NaN that would poison the whole layout.
+                        dx = (i - j) || 1; dy = 0; dz = 0; d2 = 1;
+                    }
+                    const d = Math.sqrt(d2);
+                    const f = (k * k) / d;
+                    const ux = (dx / d) * f, uy = (dy / d) * f, uz = (dz / d) * f;
+                    F[i * 3] += ux; F[i * 3 + 1] += uy; F[i * 3 + 2] += uz;
+                    F[j * 3] -= ux; F[j * 3 + 1] -= uy; F[j * 3 + 2] -= uz;
+                }
+            }
+
+            // Attraction along real CFG edges.
+            for (let l = 0; l < pairs.length; l += 2) {
+                const i = pairs[l], j = pairs[l + 1];
+                const dx = P[i * 3] - P[j * 3];
+                const dy = P[i * 3 + 1] - P[j * 3 + 1];
+                const dz = P[i * 3 + 2] - P[j * 3 + 2];
+                const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-3;
+                const f = (d * d) / k;
+                const ux = (dx / d) * f, uy = (dy / d) * f, uz = (dz / d) * f;
+                F[i * 3] -= ux; F[i * 3 + 1] -= uy; F[i * 3 + 2] -= uz;
+                F[j * 3] += ux; F[j * 3 + 1] += uy; F[j * 3 + 2] += uz;
+            }
+
+            // Gravity. Without it the graph drifts, and in 3D it is also what
+            // keeps the z axis from collapsing to a plane.
+            for (let i = 0; i < N; i++) {
+                F[i * 3] -= P[i * 3] * 0.35;
+                F[i * 3 + 1] -= P[i * 3 + 1] * 0.35;
+                F[i * 3 + 2] -= P[i * 3 + 2] * 0.35;
+            }
+
+            for (let i = 0; i < N * 3; i++) {
+                const f = F[i];
+                const step = f < 0 ? -Math.min(-f, temp) : Math.min(f, temp);
+                P[i] += step;
+            }
+            temp -= cool;
+        }
+
+        // Normalise so graphs of wildly different sizes frame the same way. The old
+        // circle fallback used a radius of about 7 for a small graph, so hold
+        // that roughly: normalising to 16 made every node render half the size
+        // it used to at the same camera distance.
+        let maxR = 0;
+        for (let i = 0; i < N; i++) {
+            maxR = Math.max(maxR, Math.hypot(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]));
+        }
+        const scale = maxR > 1e-6 ? 9 / maxR : 1;
+        for (let i = 0; i < N; i++) {
+            nodes[i].__pos = [P[i * 3] * scale, P[i * 3 + 1] * scale, P[i * 3 + 2] * scale];
         }
     }
 
@@ -431,6 +504,7 @@ export class Graph3D {
             depthWrite: false,
         });
         const lines = new THREE.LineSegments(geom, mat);
+        lines.renderOrder = -1;
         this._root.add(lines);
         this._edgeLine = lines;
     }

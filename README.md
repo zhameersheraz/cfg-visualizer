@@ -51,7 +51,7 @@ for the one branch that matters.
                                     v
                          +----------+-----------+
                          |  Three.js  (browser) |
-                         |  d3-force-3d layout  |
+                         |  3D force layout      |
                          |  GSAP camera fly-to  |
                          +----------------------+
                                     |
@@ -66,8 +66,10 @@ for the one branch that matters.
 2. User picks a function. Browser `GET`s `/function/{addr}?session_id=...`.
    Backend runs `agj @ {addr}` (graph as JSON), transforms it into the
    canonical schema, returns it.
-3. Frontend feeds the CFG into `d3-force-3d` to compute 3D positions,
-   then hands those to Three.js meshes.
+3. Frontend runs its own seeded 3D force layout to settle node positions,
+   then hands those to Three.js meshes. No layout dependency, so nothing can
+   break from a CDN. The seed is fixed, so the same binary always draws the
+   same graph.
 4. Click a node -> raycaster hit -> GSAP camera fly-to + side panel
    slides in with the disassembly.
 
